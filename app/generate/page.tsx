@@ -32,8 +32,6 @@ export default function GeneratePage() {
   // Redirect if not authenticated (but allow guests)
   useEffect(() => {
     if (!authLoading && !user && !fingerprint) {
-      // Allow unauthenticated users with guest fingerprint
-      // If no user and no guest fingerprint, redirect to auth
       if (!fingerprint) {
         router.push('/auth');
       }
@@ -46,33 +44,37 @@ export default function GeneratePage() {
     setResult(null);
 
     try {
-      // Get API key from localStorage if available
       const storedApiKey = typeof window !== 'undefined' ? localStorage.getItem('userApiKey') : null;
       
-      // Prepare headers
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
 
-      // ✅ FIX: Use firebaseUser from context instead of user
+      // ✅ Use firebaseUser for authentication
       if (firebaseUser) {
         try {
-          // Get the Firebase ID token from the firebaseUser object
           const token = await firebaseUser.getIdToken();
           headers['Authorization'] = `Bearer ${token}`;
           headers['x-user-id'] = firebaseUser.uid;
+          console.log('✅ User authenticated with token');
         } catch (tokenError) {
           console.error('Failed to get ID token:', tokenError);
           throw new Error('Authentication failed. Please sign out and sign in again.');
         }
       } else if (fingerprint) {
         headers['x-guest-fingerprint'] = fingerprint;
+        console.log('✅ Guest authenticated with fingerprint');
+      } else {
+        throw new Error('No user or guest identifier found');
       }
 
       if (storedApiKey) {
         headers['x-user-api-key'] = storedApiKey;
+        console.log('✅ Using stored API key');
       }
 
+      console.log('🚀 Sending request to /api/generate');
+      
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers,
@@ -85,11 +87,15 @@ export default function GeneratePage() {
       });
 
       const data = await response.json();
+      console.log('📦 Response status:', response.status);
+      console.log('📦 Response data:', data);
 
       if (!response.ok) {
-        // Handle specific error cases
         if (response.status === 401) {
           throw new Error('Authentication failed. Please sign out and sign in again.');
+        }
+        if (response.status === 404) {
+          throw new Error('User not found. Please sign out and sign in again.');
         }
         throw new Error(data.error || 'Failed to generate assignment');
       }
@@ -100,13 +106,12 @@ export default function GeneratePage() {
 
       setResult(data.data);
       
-      // Refresh user data to update trial counts
       if (user) {
         await refreshUser();
       }
       
     } catch (err) {
-      console.error('Generate error:', err);
+      console.error('❌ Generate error:', err);
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
     } finally {
       setIsGenerating(false);
@@ -127,7 +132,6 @@ export default function GeneratePage() {
     );
   }
 
-  // Don't render if no user and no guest fingerprint
   if (!user && !fingerprint) {
     return null;
   }
@@ -145,7 +149,6 @@ export default function GeneratePage() {
           </p>
         </div>
 
-        {/* Trial Counter */}
         {!isUnlimited && (
           <div className="mb-6">
             <TrialCounter 
@@ -155,12 +158,10 @@ export default function GeneratePage() {
           </div>
         )}
 
-        {/* API Key Manager */}
         <div className="mb-6">
           <ApiKeyManager />
         </div>
 
-        {/* Error Display */}
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
             <p className="font-medium">Error</p>
@@ -168,7 +169,6 @@ export default function GeneratePage() {
           </div>
         )}
 
-        {/* Result Display */}
         {result ? (
           <ResultDisplay
             code={result.code}

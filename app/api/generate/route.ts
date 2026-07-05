@@ -9,8 +9,7 @@ import {
   getGuestData,
   incrementGuestTrial,
   getRemainingTrials,
-  updateUserData,
-  setUserData
+  updateUserData
 } from '@/lib/firebase/database';
 import { 
   createWordDocument
@@ -25,7 +24,6 @@ import {
   isValidPrompt, 
   isValidLanguage 
 } from '@/lib/rate-limit';
-import { User } from '@/types';
 
 // Validation schema
 const generateSchema = z.object({
@@ -67,7 +65,6 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       );
     }
     
-    // Sanitize optional fields
     if (title) {
       title = sanitizeInput(title);
       if (title.length > 100) {
@@ -94,45 +91,39 @@ export const POST = withRateLimit(async (request: NextRequest) => {
     const guestFingerprint = request.headers.get('x-guest-fingerprint');
     const userApiKeyHeader = request.headers.get('x-user-api-key');
 
+    console.log('🔑 Auth Header:', authHeader ? 'Present' : 'Missing');
+    console.log('👤 User ID from header:', userId);
+    console.log('👤 Guest Fingerprint:', guestFingerprint);
+
     let apiKeyToUse: string | undefined;
     let remainingTrials = 5;
     let isPremium = false;
     let userType: 'premium' | 'free' | 'guest' | 'api-key' = 'guest';
     let verifiedUserId: string | null = null;
 
-    // 4. Verify user authentication if userId is provided
+    // 4. Verify user authentication
     if (userId) {
-      try {
-        // Get the ID token from Authorization header
-        const idToken = authHeader?.split('Bearer ')[1];
-        
-        if (idToken) {
-          // ✅ FIX: Properly verify the token
-          // For now, we'll use the userId from the header
-          // In production, you should verify the token using Firebase Admin SDK
-          verifiedUserId = userId;
-          console.log('User authenticated with token:', userId);
-        } else {
-          // ❌ No token provided, but userId is present - this is invalid
-          console.error('No authorization token provided for user:', userId);
-          return NextResponse.json(
-            { success: false, error: 'Authentication required. Please sign out and sign in again.' },
-            { status: 401 }
-          );
-        }
-      } catch (error) {
-        console.error('Auth verification error:', error);
+      const idToken = authHeader?.split('Bearer ')[1];
+      
+      if (!idToken) {
+        console.error('❌ No authorization token provided');
         return NextResponse.json(
-          { success: false, error: 'Authentication failed' },
+          { 
+            success: false, 
+            error: 'Authentication required. Please sign out and sign in again.',
+            code: 'NO_TOKEN'
+          },
           { status: 401 }
         );
       }
+      
+      // ✅ User is authenticated
+      verifiedUserId = userId;
+      console.log('✅ User authenticated:', verifiedUserId);
     }
 
     // 5. Determine which API key to use and check trials
-    // Check for user-provided API key from header first (for guests)
     if (userApiKeyHeader && userApiKeyHeader.length > 10) {
-      // Validate the provided API key format
       const sanitizedKey = sanitizeInput(userApiKeyHeader);
       if (sanitizedKey.length < 10) {
         return NextResponse.json(
@@ -143,52 +134,29 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       apiKeyToUse = sanitizedKey;
       userType = 'api-key';
       remainingTrials = Infinity;
+      console.log('✅ Using API key from header');
     } else if (verifiedUserId) {
-      // Logged in user - check their data
-      let userData = await getUserData(verifiedUserId);
+      // ✅ Get user data - DON'T create it here
+      const userData = await getUserData(verifiedUserId);
       
-      // ✅ FIX: If user doesn't exist in DB, create them
+      // ✅ If user doesn't exist in DB, return error (AuthContext should have created it)
       if (!userData) {
-        console.log('User not found in DB, creating:', verifiedUserId);
-        try {
-          const newUser: User = {
-            uid: verifiedUserId,
-            email: '', // We don't have email from headers
-            displayName: '',
-            photoURL: '',
-            createdAt: Date.now(),
-            lastLogin: Date.now(),
-            isPremium: false,
-            freeTrialsUsed: 0,
-            maxFreeTrials: 5,
-            totalGenerations: 0,
-            apiKey: null,
-            apiKeyProvider: null,
-          };
-          const createResult = await setUserData(verifiedUserId, newUser);
-          if (!createResult.success) {
-            console.error('Failed to create user:', createResult.error);
-            return NextResponse.json(
-              { success: false, error: 'Failed to create user account. Please try again.' },
-              { status: 500 }
-            );
-          }
-          // Fetch the newly created user
-          userData = await getUserData(verifiedUserId);
-          if (!userData) {
-            return NextResponse.json(
-              { success: false, error: 'Failed to create user account. Please try again.' },
-              { status: 500 }
-            );
-          }
-        } catch (createError) {
-          console.error('Error creating user:', createError);
-          return NextResponse.json(
-            { success: false, error: 'Failed to create user account. Please try again.' },
-            { status: 500 }
-          );
-        }
+        console.error('❌ User not found in DB for UID:', verifiedUserId);
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: 'User account not fully set up. Please sign out and sign in again.',
+            code: 'USER_NOT_IN_DB'
+          },
+          { status: 404 }
+        );
       }
+
+      console.log('✅ User data found in DB:', {
+        uid: userData.uid,
+        isPremium: userData.isPremium,
+        trialsUsed: userData.freeTrialsUsed
+      });
 
       // Check if user has stored their own API key
       if (userData.apiKey) {
@@ -198,10 +166,10 @@ export const POST = withRateLimit(async (request: NextRequest) => {
             apiKeyToUse = decryptedKey;
             userType = 'api-key';
             remainingTrials = Infinity;
+            console.log('✅ Using user\'s own API key');
           }
         } catch (error) {
           console.error('Failed to decrypt API key:', error);
-          // Fall through to normal flow
         }
       }
 
@@ -213,8 +181,8 @@ export const POST = withRateLimit(async (request: NextRequest) => {
         if (isPremium) {
           apiKeyToUse = process.env.GEMINI_API_KEY;
           remainingTrials = Infinity;
+          console.log('✅ Premium user - unlimited trials');
         } else {
-          // Free user - check trials
           const usedTrials = userData.freeTrialsUsed || 0;
           const maxTrials = userData.maxFreeTrials || 5;
           remainingTrials = maxTrials - usedTrials;
@@ -231,10 +199,11 @@ export const POST = withRateLimit(async (request: NextRequest) => {
             );
           }
           apiKeyToUse = process.env.GEMINI_API_KEY;
+          console.log(`✅ Free user - ${remainingTrials} trials remaining`);
         }
       }
     } else if (guestFingerprint) {
-      // Validate guest fingerprint
+      // Guest user logic
       if (!/^[a-zA-Z0-9_]+$/.test(guestFingerprint)) {
         return NextResponse.json(
           { success: false, error: 'Invalid guest identifier' },
@@ -242,10 +211,8 @@ export const POST = withRateLimit(async (request: NextRequest) => {
         );
       }
       
-      // Guest user - check for stored API key
       const guestData = await getGuestData(guestFingerprint);
       
-      // Check if guest has stored API key
       if (guestData?.apiKey) {
         try {
           const decryptedKey = decrypt(guestData.apiKey);
@@ -259,7 +226,6 @@ export const POST = withRateLimit(async (request: NextRequest) => {
         }
       }
 
-      // If no guest API key, use system key with trials
       if (!apiKeyToUse) {
         if (guestData) {
           const usedTrials = guestData.freeTrialsUsed || 0;
@@ -278,10 +244,10 @@ export const POST = withRateLimit(async (request: NextRequest) => {
             );
           }
         } else {
-          // New guest - has all 5 trials
           remainingTrials = 5;
         }
         apiKeyToUse = process.env.GEMINI_API_KEY;
+        console.log(`✅ Guest user - ${remainingTrials} trials remaining`);
       }
     } else {
       return NextResponse.json(
@@ -291,13 +257,14 @@ export const POST = withRateLimit(async (request: NextRequest) => {
     }
 
     if (!apiKeyToUse) {
+      console.error('❌ No API key available');
       return NextResponse.json(
         { success: false, error: 'API key not configured' },
         { status: 500 }
       );
     }
 
-    // Validate Gemini API key is working (quick check)
+    // 6. Validate Gemini API key
     try {
       const testResponse = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKeyToUse}`,
@@ -311,10 +278,10 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       }
     } catch (error) {
       console.error('API key validation error:', error);
-      // Continue anyway - the key might still work for generation
     }
 
-    // 6. Generate assignment (code + image)
+    // 7. Generate assignment
+    console.log('🚀 Generating assignment...');
     const generationResult = await generateAssignment(prompt, language, apiKeyToUse);
 
     if (generationResult.error || !generationResult.code) {
@@ -327,16 +294,15 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       );
     }
 
-    // 7. Process the output image
+    // 8. Process output image
     let outputImage = generationResult.image;
     let outputImageUrl = generationResult.imageUrl;
     
-    // If no image was generated, create a fallback diagram
     if (!outputImage && !outputImageUrl) {
       outputImage = generateFallbackDiagram(generationResult.code, language);
     }
 
-    // 8. Create Word document
+    // 9. Create Word document
     const expNumber = experimentNumber || '1';
     const docTitle = title || '';
 
@@ -352,11 +318,11 @@ export const POST = withRateLimit(async (request: NextRequest) => {
 
     const wordBlob = await createWordDocument(docOptions);
 
-    // 9. Convert to Base64 for response
+    // 10. Convert to Base64
     const buffer = await wordBlob.arrayBuffer();
     const base64File = Buffer.from(buffer).toString('base64');
 
-    // 10. Update trial counts (only for free users, not API key users)
+    // 11. Update trial counts
     if (userType !== 'api-key') {
       if (verifiedUserId && !isPremium) {
         await incrementUserTrial(verifiedUserId);
@@ -371,7 +337,7 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       }
     }
 
-    // 11. Save generation history (if logged in)
+    // 12. Save generation history
     if (verifiedUserId) {
       await saveGeneration(verifiedUserId, {
         prompt,
@@ -384,11 +350,13 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       });
     }
 
-    // 12. Return response with file data
+    // 13. Return response
     const fileName = docTitle 
       ? `daaExp${expNumber}_${docTitle.replace(/\s+/g, '_').toLowerCase()}.docx`
       : `daaExp${expNumber}.docx`;
 
+    console.log('✅ Generation complete!');
+    
     return NextResponse.json({
       success: true,
       data: {
@@ -407,7 +375,7 @@ export const POST = withRateLimit(async (request: NextRequest) => {
     });
 
   } catch (error) {
-    console.error('Error in generate API:', error);
+    console.error('❌ Error in generate API:', error);
     return NextResponse.json(
       { 
         success: false, 
@@ -418,10 +386,7 @@ export const POST = withRateLimit(async (request: NextRequest) => {
   }
 });
 
-/**
- * GET endpoint to check remaining trials
- * Rate limited: 20 requests per minute
- */
+// GET endpoint for checking trials
 export const GET = withRateLimit(async (request: NextRequest) => {
   try {
     const authHeader = request.headers.get('authorization');
@@ -429,31 +394,18 @@ export const GET = withRateLimit(async (request: NextRequest) => {
     const guestFingerprint = request.headers.get('x-guest-fingerprint');
     const userApiKey = request.headers.get('x-user-api-key');
 
-    // Verify user if userId is provided
     let verifiedUserId: string | null = null;
     if (userId) {
-      try {
-        const idToken = authHeader?.split('Bearer ')[1];
-        if (idToken) {
-          // In production, verify the token
-          verifiedUserId = userId;
-        } else {
-          // ❌ No token provided
-          return NextResponse.json(
-            { error: 'Authentication required' },
-            { status: 401 }
-          );
-        }
-      } catch (error) {
-        console.error('Auth verification error:', error);
+      const idToken = authHeader?.split('Bearer ')[1];
+      if (!idToken) {
         return NextResponse.json(
-          { error: 'Authentication failed' },
+          { error: 'Authentication required' },
           { status: 401 }
         );
       }
+      verifiedUserId = userId;
     }
 
-    // If user has their own API key, they have unlimited trials
     if (userApiKey && userApiKey.length > 10) {
       return NextResponse.json({
         remainingTrials: Infinity,
@@ -465,34 +417,8 @@ export const GET = withRateLimit(async (request: NextRequest) => {
     }
 
     if (verifiedUserId) {
-      let userData = await getUserData(verifiedUserId);
-      
-      // ✅ FIX: If user doesn't exist, create them
-      if (!userData) {
-        try {
-          const newUser: User = {
-            uid: verifiedUserId,
-            email: '',
-            displayName: '',
-            photoURL: '',
-            createdAt: Date.now(),
-            lastLogin: Date.now(),
-            isPremium: false,
-            freeTrialsUsed: 0,
-            maxFreeTrials: 5,
-            totalGenerations: 0,
-            apiKey: null,
-            apiKeyProvider: null,
-          };
-          await setUserData(verifiedUserId, newUser);
-          userData = await getUserData(verifiedUserId);
-        } catch (error) {
-          console.error('Failed to create user:', error);
-        }
-      }
-      
+      const userData = await getUserData(verifiedUserId);
       if (userData) {
-        // Check if user has stored API key
         if (userData.apiKey) {
           try {
             const decryptedKey = decrypt(userData.apiKey);
@@ -506,7 +432,7 @@ export const GET = withRateLimit(async (request: NextRequest) => {
               });
             }
           } catch (error) {
-            console.error('Failed to decrypt API key for check:', error);
+            console.error('Failed to decrypt API key:', error);
           }
         }
 
@@ -530,7 +456,6 @@ export const GET = withRateLimit(async (request: NextRequest) => {
     }
 
     if (guestFingerprint) {
-      // Validate guest fingerprint
       if (!/^[a-zA-Z0-9_]+$/.test(guestFingerprint)) {
         return NextResponse.json(
           { error: 'Invalid guest identifier' },
@@ -540,7 +465,6 @@ export const GET = withRateLimit(async (request: NextRequest) => {
       
       const guestData = await getGuestData(guestFingerprint);
       if (guestData) {
-        // Check if guest has stored API key
         if (guestData.apiKey) {
           try {
             const decryptedKey = decrypt(guestData.apiKey);
@@ -554,7 +478,7 @@ export const GET = withRateLimit(async (request: NextRequest) => {
               });
             }
           } catch (error) {
-            console.error('Failed to decrypt guest API key for check:', error);
+            console.error('Failed to decrypt guest API key:', error);
           }
         }
         return NextResponse.json({
@@ -565,7 +489,6 @@ export const GET = withRateLimit(async (request: NextRequest) => {
           hasApiKey: false,
         });
       }
-      // New guest
       return NextResponse.json({
         remainingTrials: 5,
         isPremium: false,

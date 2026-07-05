@@ -4,7 +4,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChange, signOut as firebaseSignOut } from '@/lib/firebase/auth';
-import { getUserData, setUserData, getRemainingTrials } from '@/lib/firebase/database';
+import { getUserData, setUserData } from '@/lib/firebase/database';
 import { User } from '@/types';
 
 interface AuthContextType {
@@ -51,12 +51,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const result = await setUserData(fbUser.uid, newUser);
         if (!result.success) {
           console.error('Failed to create user:', result.error);
-          // Don't throw, just log the error
-        } else {
-          console.log('User created successfully');
-          // Fetch the user data again after creation
-          userData = await getUserData(fbUser.uid);
+          throw new Error('Failed to create user account');
         }
+        
+        console.log('User created successfully');
+        // Fetch the user data again after creation
+        userData = await getUserData(fbUser.uid);
       }
       
       if (userData) {
@@ -66,13 +66,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setRemainingTrials(trials);
       } else {
         console.warn('Still no user data after creation attempt');
-        // Set default values
         setUser(null);
         setRemainingTrials(0);
       }
     } catch (error) {
       console.error('Error fetching user data:', error);
-      // Set default values on error
       setUser(null);
       setRemainingTrials(0);
     }
