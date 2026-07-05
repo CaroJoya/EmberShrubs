@@ -60,9 +60,22 @@ export const incrementUserTrial = async (uid: string) => {
   }
 };
 
+// Reset user trials (for testing or admin)
+export const resetUserTrials = async (uid: string) => {
+  try {
+    const userRef = ref(database, `users/${uid}/freeTrialsUsed`);
+    await set(userRef, 0);
+    return { success: true };
+  } catch (error) {
+    console.error('Error resetting trials:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: errorMessage };
+  }
+};
+
 // === Guest Functions ===
 
-// Get guest data by IP/fingerprint
+// Get guest data by fingerprint
 export const getGuestData = async (fingerprint: string): Promise<Guest | null> => {
   try {
     const guestRef = ref(database, `guests/${fingerprint}`);
@@ -98,6 +111,19 @@ export const incrementGuestTrial = async (fingerprint: string) => {
     return { success: true };
   } catch (error) {
     console.error('Error incrementing guest trial:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: errorMessage };
+  }
+};
+
+// Reset guest trials (for testing)
+export const resetGuestTrials = async (fingerprint: string) => {
+  try {
+    const guestRef = ref(database, `guests/${fingerprint}/freeTrialsUsed`);
+    await set(guestRef, 0);
+    return { success: true };
+  } catch (error) {
+    console.error('Error resetting guest trials:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: errorMessage };
   }
@@ -158,5 +184,33 @@ export const updateAnalytics = async (date: string, data: {
     console.error('Error updating analytics:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: errorMessage };
+  }
+};
+
+// === Utility Functions ===
+
+// Check if user has trials left
+export const hasTrialsLeft = async (uid: string): Promise<boolean> => {
+  try {
+    const userData = await getUserData(uid);
+    if (!userData) return false;
+    if (userData.isPremium) return true;
+    return (userData.maxFreeTrials - userData.freeTrialsUsed) > 0;
+  } catch (error) {
+    console.error('Error checking trials:', error);
+    return false;
+  }
+};
+
+// Get remaining trials for user
+export const getRemainingTrials = async (uid: string): Promise<number> => {
+  try {
+    const userData = await getUserData(uid);
+    if (!userData) return 0;
+    if (userData.isPremium) return Infinity;
+    return userData.maxFreeTrials - userData.freeTrialsUsed;
+  } catch (error) {
+    console.error('Error getting remaining trials:', error);
+    return 0;
   }
 };

@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { getGuestData, setGuestData } from '@/lib/firebase/database';
+import { getGuestData, setGuestData, incrementGuestTrial } from '@/lib/firebase/database';
 import { Guest } from '@/types';
 
 // Generate a fingerprint from IP + User-Agent
@@ -26,7 +26,6 @@ const getFingerprint = (): string => {
 };
 
 export const useGuest = () => {
-  // Use useMemo to compute fingerprint once (no setState in effect!)
   const fingerprint = useMemo(() => {
     if (typeof window === 'undefined') return '';
     return getFingerprint();
@@ -35,8 +34,9 @@ export const useGuest = () => {
   const [guestData, setGuestDataState] = useState<Guest | null>(null);
   const [loading, setLoading] = useState(true);
   const [remainingTrials, setRemainingTrials] = useState(5);
+  const [maxTrials] = useState(5);
 
-  // Load guest data - this only runs when fingerprint is available
+  // Load guest data
   useEffect(() => {
     if (!fingerprint) return;
 
@@ -84,12 +84,31 @@ export const useGuest = () => {
     }
   };
 
+  const incrementTrial = async () => {
+    if (!fingerprint) return false;
+    try {
+      const result = await incrementGuestTrial(fingerprint);
+      if (result.success) {
+        await refreshGuest();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error incrementing guest trial:', error);
+      return false;
+    }
+  };
+
+  const hasTrialsLeft = remainingTrials > 0;
+
   return {
     fingerprint,
     guestData,
     loading,
     remainingTrials,
+    maxTrials,
     refreshGuest,
-    maxTrials: 5,
+    incrementTrial,
+    hasTrialsLeft,
   };
 };

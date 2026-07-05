@@ -61,6 +61,8 @@ export const ResultDisplay: React.FC<ResultDisplayProps> = ({
     }
   };
 
+  const hasTrialsLeft = remainingTrials > 0 && !isPremium;
+
   return (
     <div className="card fade-in">
       {/* Success Header */}
@@ -74,7 +76,7 @@ export const ResultDisplay: React.FC<ResultDisplayProps> = ({
             Experiment No. {experimentNumber}{title ? ` - ${title}` : ''}
           </p>
           <p className="text-xs text-slate-400 mt-1">
-            {language} • {isPremium ? '♾️ Premium' : `${remainingTrials} trials remaining`}
+            {language} • {isPremium ? '♾️ Premium' : hasTrialsLeft ? `${remainingTrials} trials remaining` : '⚠️ No trials left'}
           </p>
         </div>
       </div>

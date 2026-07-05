@@ -4,7 +4,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChange, signOut as firebaseSignOut } from '@/lib/firebase/auth';
-import { getUserData, setUserData } from '@/lib/firebase/database';
+import { getUserData, setUserData, getRemainingTrials } from '@/lib/firebase/database';
 import { User } from '@/types';
 
 interface AuthContextType {
@@ -23,11 +23,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [remainingTrials, setRemainingTrials] = useState(5);
 
   const fetchUserData = useCallback(async (fbUser: FirebaseUser) => {
     const userData = await getUserData(fbUser.uid);
     if (userData) {
       setUser(userData);
+      const trials = userData.isPremium ? Infinity : userData.maxFreeTrials - userData.freeTrialsUsed;
+      setRemainingTrials(trials);
     } else {
       // Create new user if doesn't exist
       const newUser: User = {
@@ -46,6 +49,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
       await setUserData(fbUser.uid, newUser);
       setUser(newUser);
+      setRemainingTrials(5);
     }
   }, []);
 
@@ -63,6 +67,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         await fetchUserData(fbUser);
       } else {
         setUser(null);
+        setRemainingTrials(0);
       }
       
       setLoading(false);
@@ -75,6 +80,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await firebaseSignOut();
     setUser(null);
     setFirebaseUser(null);
+    setRemainingTrials(0);
   }, []);
 
   const value = {
@@ -82,7 +88,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     firebaseUser,
     loading,
     isPremium: user?.isPremium || false,
-    remainingTrials: user ? user.maxFreeTrials - user.freeTrialsUsed : 0,
+    remainingTrials: remainingTrials === Infinity ? Infinity : remainingTrials,
     signOut,
     refreshUser,
   };

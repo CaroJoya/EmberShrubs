@@ -1,18 +1,33 @@
 // app/page.tsx
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { GenerateForm } from '@/components/GenerateForm';
 import { ResultDisplay } from '@/components/ResultDisplay';
 import { Navbar } from '@/components/Navbar';
 import { TrialCounter } from '@/components/TrialCounter';
+import { useGuest } from '@/lib/hooks/useGuest';
 
 export default function Home() {
-  const { user, isPremium, remainingTrials, loading } = useAuth();
+  const { user, isPremium, remainingTrials: userRemainingTrials, loading: authLoading } = useAuth();
+  const { fingerprint, remainingTrials: guestRemainingTrials, loading: guestLoading } = useGuest();
   const [generationResult, setGenerationResult] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localRemainingTrials, setLocalRemainingTrials] = useState<number>(5);
+  const [userType, setUserType] = useState<'premium' | 'free' | 'guest' | 'api-key'>('guest');
+
+  // Determine which remaining trials to show
+  useEffect(() => {
+    if (user) {
+      setLocalRemainingTrials(userRemainingTrials);
+      setUserType(isPremium ? 'premium' : 'free');
+    } else if (fingerprint) {
+      setLocalRemainingTrials(guestRemainingTrials);
+      setUserType('guest');
+    }
+  }, [user, isPremium, userRemainingTrials, fingerprint, guestRemainingTrials]);
 
   const handleGenerate = async (prompt: string, language: string, experimentNumber?: string, title?: string) => {
     setIsGenerating(true);
@@ -23,22 +38,7 @@ export default function Home() {
       // Get guest fingerprint if not logged in
       let guestFingerprint = null;
       if (!user) {
-        guestFingerprint = localStorage.getItem('guestFingerprint');
-        if (!guestFingerprint) {
-          // Simple fingerprint generation
-          const ua = window.navigator.userAgent;
-          const screen = `${window.screen.width}x${window.screen.height}`;
-          const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          const str = `${ua}|${screen}|${timezone}`;
-          let hash = 0;
-          for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-          }
-          guestFingerprint = `guest_${Math.abs(hash)}`;
-          localStorage.setItem('guestFingerprint', guestFingerprint);
-        }
+        guestFingerprint = fingerprint;
       }
 
       const response = await fetch('/api/generate', {
@@ -58,6 +58,14 @@ export default function Home() {
       }
 
       setGenerationResult(data);
+      
+      // Update local trial count
+      if (data.remainingTrials !== undefined) {
+        setLocalRemainingTrials(data.remainingTrials);
+      }
+      if (data.userType) {
+        setUserType(data.userType);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
     } finally {
@@ -69,6 +77,8 @@ export default function Home() {
     setGenerationResult(null);
     setError(null);
   };
+
+  const isLoading = authLoading || guestLoading;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -85,9 +95,23 @@ export default function Home() {
         </div>
 
         {/* Trial Counter */}
-        {!isPremium && !generationResult && (
+        {!isLoading && userType !== 'premium' && userType !== 'api-key' && !generationResult && (
           <div className="mb-6 flex justify-center">
-            <TrialCounter remainingTrials={remainingTrials} />
+            <TrialCounter 
+              remainingTrials={localRemainingTrials} 
+              maxTrials={5}
+            />
+          </div>
+        )}
+
+        {/* Premium/API Key Status */}
+        {!isLoading && (userType === 'premium' || userType === 'api-key') && !generationResult && (
+          <div className="mb-6 flex justify-center">
+            <div className="inline-flex items-center gap-2 bg-green-50 text-green-700 px-4 py-2 rounded-full border border-green-200">
+              <span className="text-sm font-medium">
+                {userType === 'premium' ? '✨ Premium User - Unlimited Generations' : '🔑 Using Your Own API Key - Unlimited'}
+              </span>
+            </div>
           </div>
         )}
 
@@ -109,7 +133,8 @@ export default function Home() {
           <GenerateForm
             onSubmit={handleGenerate}
             isLoading={isGenerating}
-            isPremium={isPremium}
+            isPremium={userType === 'premium' || userType === 'api-key'}
+            remainingTrials={localRemainingTrials}
           />
         )}
 
@@ -124,17 +149,42 @@ export default function Home() {
             fileData={generationResult.data.fileData}
             fileName={generationResult.data.fileName}
             remainingTrials={generationResult.remainingTrials}
-            isPremium={generationResult.isPremium}
+            isPremium={generationResult.isPremium || generationResult.userType === 'api-key'}
             onGenerateAnother={handleGenerateAnother}
           />
         )}
 
-        {/* Premium Status */}
-        {isPremium && generationResult && (
-          <div className="mt-6 text-center">
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
-              ✨ Premium User - Unlimited Generations
-            </span>
+        {/* Trial Expired Notice */}
+        {!isLoading && !generationResult && localRemainingTrials === 0 && userType !== 'premium' && userType !== 'api-key' && (
+          <div className="mt-6 p-6 bg-red-50 border border-red-200 rounded-lg text-center">
+            <h3 className="text-lg font-semibold text-red-800 mb-2">No Free Trials Left</h3>
+            <p className="text-red-600 mb-4">
+              You've used all {5} free generations. 
+              {!user ? ' Sign in to get more trials or use your own API key.' : ' Upgrade to premium or use your own API key for unlimited generations.'}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              {!user && (
+                <button
+                  onClick={() => document.querySelector<HTMLButtonElement>('[data-sign-in]')?.click()}
+                  className="btn-primary"
+                >
+                  Sign In
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  // Show API key input
+                  const apiKeyInput = document.querySelector<HTMLInputElement>('[data-api-key-input]');
+                  if (apiKeyInput) {
+                    apiKeyInput.classList.toggle('hidden');
+                    apiKeyInput.focus();
+                  }
+                }}
+                className="btn-secondary"
+              >
+                Enter Your Own API Key
+              </button>
+            </div>
           </div>
         )}
       </main>

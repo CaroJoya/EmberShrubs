@@ -7,7 +7,8 @@ import {
   incrementUserTrial,
   saveGeneration,
   getGuestData,
-  incrementGuestTrial
+  incrementGuestTrial,
+  getRemainingTrials
 } from '@/lib/firebase/database';
 import { 
   createWordDocument
@@ -48,11 +49,14 @@ export async function POST(request: NextRequest) {
     let apiKeyToUse: string | undefined;
     let remainingTrials = 5;
     let isPremium = false;
+    let userType: 'premium' | 'free' | 'guest' | 'api-key' = 'guest';
 
-    // 3. Determine which API key to use
+    // 3. Determine which API key to use and check trials
     if (userApiKey) {
-      // User provided their own API key
+      // User provided their own API key - bypass all trial checks
       apiKeyToUse = userApiKey;
+      userType = 'api-key';
+      remainingTrials = Infinity;
     } else if (userId) {
       // Logged in user - check their data
       const userData = await getUserData(userId);
@@ -64,10 +68,12 @@ export async function POST(request: NextRequest) {
       }
 
       isPremium = userData.isPremium || false;
+      userType = isPremium ? 'premium' : 'free';
 
       // Check if premium
       if (isPremium) {
         apiKeyToUse = process.env.GEMINI_API_KEY;
+        remainingTrials = Infinity;
       } else {
         // Free user - check trials
         const usedTrials = userData.freeTrialsUsed || 0;
@@ -78,8 +84,9 @@ export async function POST(request: NextRequest) {
           return NextResponse.json(
             { 
               success: false, 
-              error: 'No free trials left. Please upgrade or use your own API key.',
-              remainingTrials: 0
+              error: 'No free trials left. Please upgrade to premium or use your own API key.',
+              remainingTrials: 0,
+              userType: 'free'
             },
             { status: 403 }
           );
@@ -99,11 +106,15 @@ export async function POST(request: NextRequest) {
             { 
               success: false, 
               error: 'No free trials left. Please sign in or use your own API key.',
-              remainingTrials: 0
+              remainingTrials: 0,
+              userType: 'guest'
             },
             { status: 403 }
           );
         }
+      } else {
+        // New guest - has all 5 trials
+        remainingTrials = 5;
       }
       apiKeyToUse = process.env.GEMINI_API_KEY;
     } else {
@@ -158,21 +169,16 @@ export async function POST(request: NextRequest) {
 
     const wordBlob = await createWordDocument(docOptions);
 
-    // 7. Convert to Base64 for response (or return as file download)
+    // 7. Convert to Base64 for response
     const buffer = await wordBlob.arrayBuffer();
     const base64File = Buffer.from(buffer).toString('base64');
 
     // 8. Update trial counts (for free users)
-    if (userId && !userApiKey) {
-      const userData = await getUserData(userId);
-      if (userData && !userData.isPremium) {
-        await incrementUserTrial(userId);
-        // Recalculate remaining trials
-        const updatedUserData = await getUserData(userId);
-        if (updatedUserData) {
-          remainingTrials = updatedUserData.maxFreeTrials - updatedUserData.freeTrialsUsed;
-        }
-      }
+    if (userId && !userApiKey && !isPremium) {
+      await incrementUserTrial(userId);
+      // Recalculate remaining trials
+      const updatedRemaining = await getRemainingTrials(userId);
+      remainingTrials = updatedRemaining;
     } else if (guestFingerprint && !userApiKey) {
       await incrementGuestTrial(guestFingerprint);
       // Recalculate remaining trials
@@ -212,8 +218,9 @@ export async function POST(request: NextRequest) {
         fileData: base64File,
         fileName: fileName,
       },
-      remainingTrials: remainingTrials,
+      remainingTrials: remainingTrials === Infinity ? Infinity : remainingTrials,
       isPremium: isPremium,
+      userType: userType,
     });
 
   } catch (error) {
@@ -235,14 +242,34 @@ export async function GET(request: NextRequest) {
   try {
     const userId = request.headers.get('x-user-id');
     const guestFingerprint = request.headers.get('x-guest-fingerprint');
+    const userApiKey = request.headers.get('x-user-api-key');
+
+    // If user has their own API key, they have unlimited trials
+    if (userApiKey) {
+      return NextResponse.json({
+        remainingTrials: Infinity,
+        isPremium: false,
+        maxTrials: Infinity,
+        userType: 'api-key',
+      });
+    }
 
     if (userId) {
       const userData = await getUserData(userId);
       if (userData) {
+        if (userData.isPremium) {
+          return NextResponse.json({
+            remainingTrials: Infinity,
+            isPremium: true,
+            maxTrials: Infinity,
+            userType: 'premium',
+          });
+        }
         return NextResponse.json({
           remainingTrials: userData.maxFreeTrials - userData.freeTrialsUsed,
-          isPremium: userData.isPremium || false,
+          isPremium: false,
           maxTrials: userData.maxFreeTrials,
+          userType: 'free',
         });
       }
     }
@@ -254,6 +281,7 @@ export async function GET(request: NextRequest) {
           remainingTrials: guestData.maxFreeTrials - guestData.freeTrialsUsed,
           isPremium: false,
           maxTrials: guestData.maxFreeTrials,
+          userType: 'guest',
         });
       }
       // New guest
@@ -261,6 +289,7 @@ export async function GET(request: NextRequest) {
         remainingTrials: 5,
         isPremium: false,
         maxTrials: 5,
+        userType: 'guest',
       });
     }
 
