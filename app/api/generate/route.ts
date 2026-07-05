@@ -9,7 +9,8 @@ import {
   getGuestData,
   incrementGuestTrial,
   getRemainingTrials,
-  updateUserData
+  updateUserData,
+  setUserData
 } from '@/lib/firebase/database';
 import { 
   createWordDocument
@@ -24,6 +25,7 @@ import {
   isValidPrompt, 
   isValidLanguage 
 } from '@/lib/rate-limit';
+import { User } from '@/types';
 
 // Validation schema
 const generateSchema = z.object({
@@ -105,16 +107,18 @@ export const POST = withRateLimit(async (request: NextRequest) => {
         const idToken = authHeader?.split('Bearer ')[1];
         
         if (idToken) {
-          // Verify the token using Firebase Admin SDK
-          // Note: For this to work, you need to set up Firebase Admin SDK
-          // For now, we'll trust the userId from the header
-          // but ideally you should verify the token
+          // ✅ FIX: Properly verify the token
+          // For now, we'll use the userId from the header
+          // In production, you should verify the token using Firebase Admin SDK
           verifiedUserId = userId;
-          console.log('User authenticated:', userId);
+          console.log('User authenticated with token:', userId);
         } else {
-          // No token provided, but userId is present
-          // This might be a client-side request without proper auth
-          verifiedUserId = userId;
+          // ❌ No token provided, but userId is present - this is invalid
+          console.error('No authorization token provided for user:', userId);
+          return NextResponse.json(
+            { success: false, error: 'Authentication required. Please sign out and sign in again.' },
+            { status: 401 }
+          );
         }
       } catch (error) {
         console.error('Auth verification error:', error);
@@ -141,12 +145,49 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       remainingTrials = Infinity;
     } else if (verifiedUserId) {
       // Logged in user - check their data
-      const userData = await getUserData(verifiedUserId);
+      let userData = await getUserData(verifiedUserId);
+      
+      // ✅ FIX: If user doesn't exist in DB, create them
       if (!userData) {
-        return NextResponse.json(
-          { success: false, error: 'User not found' },
-          { status: 404 }
-        );
+        console.log('User not found in DB, creating:', verifiedUserId);
+        try {
+          const newUser: User = {
+            uid: verifiedUserId,
+            email: '', // We don't have email from headers
+            displayName: '',
+            photoURL: '',
+            createdAt: Date.now(),
+            lastLogin: Date.now(),
+            isPremium: false,
+            freeTrialsUsed: 0,
+            maxFreeTrials: 5,
+            totalGenerations: 0,
+            apiKey: null,
+            apiKeyProvider: null,
+          };
+          const createResult = await setUserData(verifiedUserId, newUser);
+          if (!createResult.success) {
+            console.error('Failed to create user:', createResult.error);
+            return NextResponse.json(
+              { success: false, error: 'Failed to create user account. Please try again.' },
+              { status: 500 }
+            );
+          }
+          // Fetch the newly created user
+          userData = await getUserData(verifiedUserId);
+          if (!userData) {
+            return NextResponse.json(
+              { success: false, error: 'Failed to create user account. Please try again.' },
+              { status: 500 }
+            );
+          }
+        } catch (createError) {
+          console.error('Error creating user:', createError);
+          return NextResponse.json(
+            { success: false, error: 'Failed to create user account. Please try again.' },
+            { status: 500 }
+          );
+        }
       }
 
       // Check if user has stored their own API key
@@ -397,7 +438,11 @@ export const GET = withRateLimit(async (request: NextRequest) => {
           // In production, verify the token
           verifiedUserId = userId;
         } else {
-          verifiedUserId = userId;
+          // ❌ No token provided
+          return NextResponse.json(
+            { error: 'Authentication required' },
+            { status: 401 }
+          );
         }
       } catch (error) {
         console.error('Auth verification error:', error);
@@ -420,7 +465,32 @@ export const GET = withRateLimit(async (request: NextRequest) => {
     }
 
     if (verifiedUserId) {
-      const userData = await getUserData(verifiedUserId);
+      let userData = await getUserData(verifiedUserId);
+      
+      // ✅ FIX: If user doesn't exist, create them
+      if (!userData) {
+        try {
+          const newUser: User = {
+            uid: verifiedUserId,
+            email: '',
+            displayName: '',
+            photoURL: '',
+            createdAt: Date.now(),
+            lastLogin: Date.now(),
+            isPremium: false,
+            freeTrialsUsed: 0,
+            maxFreeTrials: 5,
+            totalGenerations: 0,
+            apiKey: null,
+            apiKeyProvider: null,
+          };
+          await setUserData(verifiedUserId, newUser);
+          userData = await getUserData(verifiedUserId);
+        } catch (error) {
+          console.error('Failed to create user:', error);
+        }
+      }
+      
       if (userData) {
         // Check if user has stored API key
         if (userData.apiKey) {

@@ -13,7 +13,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 export default function GeneratePage() {
   const router = useRouter();
-  const { user, loading: authLoading, isPremium, remainingTrials: userRemainingTrials, refreshUser } = useAuth();
+  const { user, firebaseUser, loading: authLoading, isPremium, remainingTrials: userRemainingTrials, refreshUser } = useAuth();
   const { fingerprint, remainingTrials: guestRemainingTrials, loading: guestLoading } = useGuest();
   
   const [isGenerating, setIsGenerating] = useState(false);
@@ -54,8 +54,17 @@ export default function GeneratePage() {
         'Content-Type': 'application/json',
       };
 
-      if (user) {
-        headers['x-user-id'] = user.uid;
+      // ✅ FIX: Use firebaseUser from context instead of user
+      if (firebaseUser) {
+        try {
+          // Get the Firebase ID token from the firebaseUser object
+          const token = await firebaseUser.getIdToken();
+          headers['Authorization'] = `Bearer ${token}`;
+          headers['x-user-id'] = firebaseUser.uid;
+        } catch (tokenError) {
+          console.error('Failed to get ID token:', tokenError);
+          throw new Error('Authentication failed. Please sign out and sign in again.');
+        }
       } else if (fingerprint) {
         headers['x-guest-fingerprint'] = fingerprint;
       }
@@ -78,6 +87,10 @@ export default function GeneratePage() {
       const data = await response.json();
 
       if (!response.ok) {
+        // Handle specific error cases
+        if (response.status === 401) {
+          throw new Error('Authentication failed. Please sign out and sign in again.');
+        }
         throw new Error(data.error || 'Failed to generate assignment');
       }
 
@@ -93,11 +106,12 @@ export default function GeneratePage() {
       }
       
     } catch (err) {
+      console.error('Generate error:', err);
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
     } finally {
       setIsGenerating(false);
     }
-  }, [user, fingerprint, refreshUser]);
+  }, [firebaseUser, user, fingerprint, refreshUser]);
 
   const handleGenerateAnother = useCallback(() => {
     setResult(null);
