@@ -12,7 +12,7 @@ export interface User {
   premiumExpiry?: number;
   freeTrialsUsed: number;
   maxFreeTrials: number;
-  apiKey?: string;
+  apiKey?: string | null; // Encrypted
   apiKeyProvider?: 'gemini' | null;
   totalGenerations: number;
 }
@@ -22,7 +22,7 @@ export interface Guest {
   maxFreeTrials: number;
   firstVisit: number;
   lastVisit: number;
-  apiKey?: string;
+  apiKey?: string | null; // Encrypted
 }
 
 export interface Generation {

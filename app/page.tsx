@@ -10,20 +10,44 @@ import { TrialCounter } from '@/components/TrialCounter';
 import { useGuest } from '@/lib/hooks/useGuest';
 
 export default function Home() {
-  const { user, isPremium, remainingTrials: userRemainingTrials, loading: authLoading } = useAuth();
+  const { user, isPremium, remainingTrials: userRemainingTrials, loading: authLoading, refreshUser } = useAuth();
   const { fingerprint, remainingTrials: guestRemainingTrials, loading: guestLoading } = useGuest();
   const [generationResult, setGenerationResult] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localRemainingTrials, setLocalRemainingTrials] = useState<number>(5);
   const [userType, setUserType] = useState<'premium' | 'free' | 'guest' | 'api-key'>('guest');
+  const [userApiKey, setUserApiKey] = useState<string | null>(null);
+
+  // Load API key from localStorage on mount
+  useEffect(() => {
+    const storedKey = localStorage.getItem('userApiKey');
+    if (storedKey) {
+      setUserApiKey(storedKey);
+    }
+  }, []);
 
   // Determine which remaining trials to show
   useEffect(() => {
     if (user) {
+      // Check if user has stored API key
+      const storedKey = localStorage.getItem('userApiKey');
+      if (storedKey) {
+        setUserType('api-key');
+        setLocalRemainingTrials(Infinity);
+        return;
+      }
+      
       setLocalRemainingTrials(userRemainingTrials);
       setUserType(isPremium ? 'premium' : 'free');
     } else if (fingerprint) {
+      // Check if guest has stored API key
+      const storedKey = localStorage.getItem('userApiKey');
+      if (storedKey) {
+        setUserType('api-key');
+        setLocalRemainingTrials(Infinity);
+        return;
+      }
       setLocalRemainingTrials(guestRemainingTrials);
       setUserType('guest');
     }
@@ -41,13 +65,26 @@ export default function Home() {
         guestFingerprint = fingerprint;
       }
 
+      // Get API key from localStorage if available
+      const apiKey = localStorage.getItem('userApiKey');
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (user?.uid) {
+        headers['x-user-id'] = user.uid;
+      }
+      if (guestFingerprint) {
+        headers['x-guest-fingerprint'] = guestFingerprint;
+      }
+      if (apiKey) {
+        headers['x-user-api-key'] = apiKey;
+      }
+
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': user?.uid || '',
-          'x-guest-fingerprint': guestFingerprint || '',
-        },
+        headers,
         body: JSON.stringify({ prompt, language, experimentNumber, title }),
       });
 
@@ -66,6 +103,11 @@ export default function Home() {
       if (data.userType) {
         setUserType(data.userType);
       }
+
+      // Refresh user data if logged in
+      if (user) {
+        await refreshUser();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
     } finally {
@@ -79,6 +121,8 @@ export default function Home() {
   };
 
   const isLoading = authLoading || guestLoading;
+
+  const isUnlimited = userType === 'premium' || userType === 'api-key';
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -95,7 +139,7 @@ export default function Home() {
         </div>
 
         {/* Trial Counter */}
-        {!isLoading && userType !== 'premium' && userType !== 'api-key' && !generationResult && (
+        {!isLoading && !isUnlimited && !generationResult && (
           <div className="mb-6 flex justify-center">
             <TrialCounter 
               remainingTrials={localRemainingTrials} 
@@ -105,7 +149,7 @@ export default function Home() {
         )}
 
         {/* Premium/API Key Status */}
-        {!isLoading && (userType === 'premium' || userType === 'api-key') && !generationResult && (
+        {!isLoading && isUnlimited && !generationResult && (
           <div className="mb-6 flex justify-center">
             <div className="inline-flex items-center gap-2 bg-green-50 text-green-700 px-4 py-2 rounded-full border border-green-200">
               <span className="text-sm font-medium">
@@ -133,7 +177,7 @@ export default function Home() {
           <GenerateForm
             onSubmit={handleGenerate}
             isLoading={isGenerating}
-            isPremium={userType === 'premium' || userType === 'api-key'}
+            isPremium={isUnlimited}
             remainingTrials={localRemainingTrials}
           />
         )}
@@ -155,7 +199,7 @@ export default function Home() {
         )}
 
         {/* Trial Expired Notice */}
-        {!isLoading && !generationResult && localRemainingTrials === 0 && userType !== 'premium' && userType !== 'api-key' && (
+        {!isLoading && !generationResult && localRemainingTrials === 0 && !isUnlimited && (
           <div className="mt-6 p-6 bg-red-50 border border-red-200 rounded-lg text-center">
             <h3 className="text-lg font-semibold text-red-800 mb-2">No Free Trials Left</h3>
             <p className="text-red-600 mb-4">
