@@ -26,30 +26,37 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [remainingTrials, setRemainingTrials] = useState(5);
 
   const fetchUserData = useCallback(async (fbUser: FirebaseUser) => {
-    const userData = await getUserData(fbUser.uid);
-    if (userData) {
-      setUser(userData);
-      const trials = userData.isPremium ? Infinity : userData.maxFreeTrials - userData.freeTrialsUsed;
-      setRemainingTrials(trials);
-    } else {
-      // Create new user if doesn't exist
-      const newUser: User = {
-        uid: fbUser.uid,
-        email: fbUser.email || '',
-        displayName: fbUser.displayName || undefined,
-        photoURL: fbUser.photoURL || undefined,
-        createdAt: Date.now(),
-        lastLogin: Date.now(),
-        isPremium: false,
-        premiumSince: undefined,
-        premiumExpiry: undefined,
-        freeTrialsUsed: 0,
-        maxFreeTrials: 5,
-        totalGenerations: 0,
-      };
-      await setUserData(fbUser.uid, newUser);
-      setUser(newUser);
-      setRemainingTrials(5);
+    try {
+      const userData = await getUserData(fbUser.uid);
+      if (userData) {
+        setUser(userData);
+        const trials = userData.isPremium ? Infinity : userData.maxFreeTrials - userData.freeTrialsUsed;
+        setRemainingTrials(trials);
+      } else {
+        // Create new user if doesn't exist
+        // Make sure we don't pass undefined values
+        const newUser: User = {
+          uid: fbUser.uid,
+          email: fbUser.email || '',
+          displayName: fbUser.displayName || '', // Use empty string instead of undefined
+          photoURL: fbUser.photoURL || '', // Use empty string instead of undefined
+          createdAt: Date.now(),
+          lastLogin: Date.now(),
+          isPremium: false,
+          premiumSince: undefined,
+          premiumExpiry: undefined,
+          freeTrialsUsed: 0,
+          maxFreeTrials: 5,
+          totalGenerations: 0,
+          apiKey: null,
+          apiKeyProvider: null,
+        };
+        await setUserData(fbUser.uid, newUser);
+        setUser(newUser);
+        setRemainingTrials(5);
+      }
+    } catch (error) {
+      console.error('Error fetching user data:', error);
     }
   }, []);
 

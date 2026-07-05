@@ -1,10 +1,9 @@
 // types/index.ts
-
 export interface User {
   uid: string;
   email: string;
-  displayName?: string;
-  photoURL?: string;
+  displayName?: string; // Optional
+  photoURL?: string; // Optional
   createdAt: number;
   lastLogin: number;
   isPremium: boolean;
