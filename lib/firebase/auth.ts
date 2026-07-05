@@ -3,8 +3,6 @@ import {
   auth 
 } from './config';
 import {
-  signInWithPopup,
-  GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
@@ -13,19 +11,6 @@ import {
   sendPasswordResetEmail,
   AuthError,
 } from 'firebase/auth';
-
-const googleProvider = new GoogleAuthProvider();
-
-// Sign in with Google
-export const signInWithGoogle = async () => {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    return { user: result.user, error: null };
-  } catch (error) {
-    const authError = error as AuthError;
-    return { user: null, error: authError.message };
-  }
-};
 
 // Sign in with Email/Password
 export const signInWithEmail = async (email: string, password: string) => {

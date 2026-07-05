@@ -5,21 +5,12 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { signInWithGoogle } from '@/lib/firebase/auth';
 import { LogOut, User, Sparkles, Menu, X } from 'lucide-react';
 
 export const Navbar = () => {
   const pathname = usePathname();
   const { user, signOut, isPremium } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
-
-  const handleSignIn = async () => {
-    try {
-      await signInWithGoogle();
-    } catch (error) {
-      console.error('Sign in failed:', error);
-    }
-  };
 
   // Show different navbars based on route
   const isLandingPage = pathname === '/';
