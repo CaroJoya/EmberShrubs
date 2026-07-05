@@ -35,7 +35,7 @@ export const generateCode = async (prompt: string, language: string, apiKey?: st
   try {
     const genAI = getGeminiClient(apiKey);
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-1.5-flash',  // ✅ FIXED: changed from gemini-2.0-flash-exp
       safetySettings,
     });
 
@@ -71,7 +71,7 @@ export const generateOutputImage = async (code: string, language: string, prompt
   try {
     const genAI = getGeminiClient(apiKey);
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-1.5-flash',  // ✅ FIXED: changed from gemini-2.0-flash-exp
       safetySettings,
     });
 
