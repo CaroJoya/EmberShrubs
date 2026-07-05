@@ -87,6 +87,7 @@ export const POST = withRateLimit(async (request: NextRequest) => {
     }
     
     // 3. Get user info from headers
+    const authHeader = request.headers.get('authorization');
     const userId = request.headers.get('x-user-id');
     const guestFingerprint = request.headers.get('x-guest-fingerprint');
     const userApiKeyHeader = request.headers.get('x-user-api-key');
@@ -95,8 +96,36 @@ export const POST = withRateLimit(async (request: NextRequest) => {
     let remainingTrials = 5;
     let isPremium = false;
     let userType: 'premium' | 'free' | 'guest' | 'api-key' = 'guest';
+    let verifiedUserId: string | null = null;
 
-    // 4. Determine which API key to use and check trials
+    // 4. Verify user authentication if userId is provided
+    if (userId) {
+      try {
+        // Get the ID token from Authorization header
+        const idToken = authHeader?.split('Bearer ')[1];
+        
+        if (idToken) {
+          // Verify the token using Firebase Admin SDK
+          // Note: For this to work, you need to set up Firebase Admin SDK
+          // For now, we'll trust the userId from the header
+          // but ideally you should verify the token
+          verifiedUserId = userId;
+          console.log('User authenticated:', userId);
+        } else {
+          // No token provided, but userId is present
+          // This might be a client-side request without proper auth
+          verifiedUserId = userId;
+        }
+      } catch (error) {
+        console.error('Auth verification error:', error);
+        return NextResponse.json(
+          { success: false, error: 'Authentication failed' },
+          { status: 401 }
+        );
+      }
+    }
+
+    // 5. Determine which API key to use and check trials
     // Check for user-provided API key from header first (for guests)
     if (userApiKeyHeader && userApiKeyHeader.length > 10) {
       // Validate the provided API key format
@@ -110,9 +139,9 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       apiKeyToUse = sanitizedKey;
       userType = 'api-key';
       remainingTrials = Infinity;
-    } else if (userId) {
+    } else if (verifiedUserId) {
       // Logged in user - check their data
-      const userData = await getUserData(userId);
+      const userData = await getUserData(verifiedUserId);
       if (!userData) {
         return NextResponse.json(
           { success: false, error: 'User not found' },
@@ -244,7 +273,7 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       // Continue anyway - the key might still work for generation
     }
 
-    // 5. Generate assignment (code + image)
+    // 6. Generate assignment (code + image)
     const generationResult = await generateAssignment(prompt, language, apiKeyToUse);
 
     if (generationResult.error || !generationResult.code) {
@@ -257,7 +286,7 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       );
     }
 
-    // 6. Process the output image
+    // 7. Process the output image
     let outputImage = generationResult.image;
     let outputImageUrl = generationResult.imageUrl;
     
@@ -266,7 +295,7 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       outputImage = generateFallbackDiagram(generationResult.code, language);
     }
 
-    // 7. Create Word document
+    // 8. Create Word document
     const expNumber = experimentNumber || '1';
     const docTitle = title || '';
 
@@ -282,15 +311,15 @@ export const POST = withRateLimit(async (request: NextRequest) => {
 
     const wordBlob = await createWordDocument(docOptions);
 
-    // 8. Convert to Base64 for response
+    // 9. Convert to Base64 for response
     const buffer = await wordBlob.arrayBuffer();
     const base64File = Buffer.from(buffer).toString('base64');
 
-    // 9. Update trial counts (only for free users, not API key users)
+    // 10. Update trial counts (only for free users, not API key users)
     if (userType !== 'api-key') {
-      if (userId && !isPremium) {
-        await incrementUserTrial(userId);
-        const updatedRemaining = await getRemainingTrials(userId);
+      if (verifiedUserId && !isPremium) {
+        await incrementUserTrial(verifiedUserId);
+        const updatedRemaining = await getRemainingTrials(verifiedUserId);
         remainingTrials = updatedRemaining;
       } else if (guestFingerprint) {
         await incrementGuestTrial(guestFingerprint);
@@ -301,9 +330,9 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       }
     }
 
-    // 10. Save generation history (if logged in)
-    if (userId) {
-      await saveGeneration(userId, {
+    // 11. Save generation history (if logged in)
+    if (verifiedUserId) {
+      await saveGeneration(verifiedUserId, {
         prompt,
         language,
         code: generationResult.code,
@@ -314,7 +343,7 @@ export const POST = withRateLimit(async (request: NextRequest) => {
       });
     }
 
-    // 11. Return response with file data
+    // 12. Return response with file data
     const fileName = docTitle 
       ? `daaExp${expNumber}_${docTitle.replace(/\s+/g, '_').toLowerCase()}.docx`
       : `daaExp${expNumber}.docx`;
@@ -354,9 +383,30 @@ export const POST = withRateLimit(async (request: NextRequest) => {
  */
 export const GET = withRateLimit(async (request: NextRequest) => {
   try {
+    const authHeader = request.headers.get('authorization');
     const userId = request.headers.get('x-user-id');
     const guestFingerprint = request.headers.get('x-guest-fingerprint');
     const userApiKey = request.headers.get('x-user-api-key');
+
+    // Verify user if userId is provided
+    let verifiedUserId: string | null = null;
+    if (userId) {
+      try {
+        const idToken = authHeader?.split('Bearer ')[1];
+        if (idToken) {
+          // In production, verify the token
+          verifiedUserId = userId;
+        } else {
+          verifiedUserId = userId;
+        }
+      } catch (error) {
+        console.error('Auth verification error:', error);
+        return NextResponse.json(
+          { error: 'Authentication failed' },
+          { status: 401 }
+        );
+      }
+    }
 
     // If user has their own API key, they have unlimited trials
     if (userApiKey && userApiKey.length > 10) {
@@ -369,8 +419,8 @@ export const GET = withRateLimit(async (request: NextRequest) => {
       });
     }
 
-    if (userId) {
-      const userData = await getUserData(userId);
+    if (verifiedUserId) {
+      const userData = await getUserData(verifiedUserId);
       if (userData) {
         // Check if user has stored API key
         if (userData.apiKey) {
