@@ -1,4 +1,4 @@
-// lib/gemini/client.ts (UPDATED)
+// lib/gemini/client.ts
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
 // System key (for free trials)
@@ -116,21 +116,35 @@ export const generateAssignment = async (prompt: string, language: string, apiKe
   // Generate code first
   const codeResult = await generateCode(prompt, language, apiKey);
   if (codeResult.error || !codeResult.code) {
-    return { code: null, image: null, error: codeResult.error || 'Code generation failed' };
+    return { code: null, image: null, imageUrl: null, error: codeResult.error || 'Code generation failed' };
   }
 
   // Then generate output image
   const imageResult = await generateOutputImage(codeResult.code, language, prompt, apiKey);
 
+  // Check if the image contains a markdown image URL
+  let imageUrl: string | null = null;
+  let imageText: string | null = imageResult.image;
+
+  if (imageResult.image) {
+    // Look for markdown image syntax: ![alt](url)
+    const imageMatch = imageResult.image.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+    if (imageMatch) {
+      imageUrl = imageMatch[1];
+      imageText = null; // Clear text since we have an actual image URL
+    }
+  }
+
   return {
     code: codeResult.code,
-    image: imageResult.image,
+    image: imageText,
+    imageUrl: imageUrl,
     error: null,
   };
 };
 
 /**
- * NEW: Generate only the output image for a given code
+ * Generate only the output image for a given code
  * This is useful for regenerating the output without regenerating the code
  */
 export const generateImageOnly = async (code: string, language: string, prompt: string, apiKey?: string) => {

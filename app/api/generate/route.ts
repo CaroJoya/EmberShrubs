@@ -13,7 +13,6 @@ import {
   createWordDocument
 } from '@/lib/docx/generator';
 import { 
-  processGeminiImageOutput, 
   generateFallbackDiagram
 } from '@/lib/docx/image-utils';
 
@@ -136,13 +135,11 @@ export async function POST(request: NextRequest) {
 
     // 5. Process the output image
     let outputImage = generationResult.image;
+    let outputImageUrl = generationResult.imageUrl;
     
     // If no image was generated, create a fallback diagram
-    if (!outputImage) {
+    if (!outputImage && !outputImageUrl) {
       outputImage = generateFallbackDiagram(generationResult.code, language);
-    } else {
-      // Clean up the image text
-      outputImage = processGeminiImageOutput(outputImage);
     }
 
     // 6. Create Word document
@@ -154,7 +151,8 @@ export async function POST(request: NextRequest) {
       title: docTitle || undefined,
       code: generationResult.code,
       language: language,
-      outputImage: outputImage,
+      outputImage: outputImage || undefined,
+      outputImageUrl: outputImageUrl || undefined,
       includeOutputHeading: true,
     };
 
@@ -190,7 +188,7 @@ export async function POST(request: NextRequest) {
         prompt,
         language,
         code: generationResult.code,
-        outputImageUrl: '', // Not storing images yet
+        outputImageUrl: outputImageUrl || '',
         experimentNumber: expNumber,
         title: docTitle || undefined,
         status: 'completed',
@@ -207,6 +205,7 @@ export async function POST(request: NextRequest) {
       data: {
         code: generationResult.code,
         image: outputImage,
+        imageUrl: outputImageUrl,
         experimentNumber: expNumber,
         title: docTitle || '',
         language: language,

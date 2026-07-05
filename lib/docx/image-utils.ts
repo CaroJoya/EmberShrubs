@@ -1,9 +1,52 @@
 // lib/docx/image-utils.ts
+import { ImageRun } from 'docx';
+
 /**
- * Utilities for handling images in Word documents
- * Note: For now, we use text-based ASCII art instead of actual images
- * This avoids the complexity of downloading and embedding images
+ * Download an image from a URL and return as buffer
  */
+export const downloadImage = async (imageUrl: string): Promise<Buffer | null> => {
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      console.error('Failed to download image:', response.status);
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (error) {
+    console.error('Error downloading image:', error);
+    return null;
+  }
+};
+
+/**
+ * Create an ImageRun for Word document
+ */
+export const createImageRun = async (
+  imageUrl: string,
+  maxWidth?: number,
+  maxHeight?: number
+): Promise<ImageRun | null> => {
+  try {
+    const imageBuffer = await downloadImage(imageUrl);
+    if (!imageBuffer) return null;
+
+    // Default dimensions
+    const width = maxWidth || 450;
+    const height = maxHeight || 300;
+
+    return new ImageRun({
+      data: imageBuffer,
+      transformation: {
+        width: width,
+        height: height,
+      },
+    });
+  } catch (error) {
+    console.error('Error creating ImageRun:', error);
+    return null;
+  }
+};
 
 /**
  * Process an image URL from Gemini and convert to text description

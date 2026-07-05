@@ -5,6 +5,7 @@ import {
   TextRun,
   AlignmentType,
   Packer,
+  ImageRun,
 } from 'docx';
 import { saveAs } from 'file-saver';
 
@@ -14,8 +15,8 @@ export interface WordDocumentOptions {
   title?: string;
   code: string;
   language: string;
-  outputImage?: string; // ASCII art or text representation
-  outputImageUrl?: string; // URL to an actual image (for future use) - kept for future use
+  outputImage?: string; // Text-based output (fallback)
+  outputImageUrl?: string; // URL to actual image
   includeOutputHeading?: boolean;
 }
 
@@ -29,7 +30,7 @@ export interface WordDocumentOptions {
  * Program:
  * > [Code goes here]
  * OUTPUT:
- * [Image - usually 1, can be multiple if needed]
+ * [Image - real image or text-based diagram]
  * ═══════════════════════════════════════════════════
  */
 export const createWordDocument = async (
@@ -39,8 +40,8 @@ export const createWordDocument = async (
     experimentNumber,
     title,
     code,
-    // language is kept in the interface for future use but not destructured
     outputImage,
+    outputImageUrl,
     includeOutputHeading = true,
   } = options;
 
@@ -49,6 +50,44 @@ export const createWordDocument = async (
     .replace(/```[\w]*\n?/g, '')
     .replace(/`/g, '')
     .trim();
+
+  // Process image - try real image first, fallback to text
+  let imageRun: ImageRun | null = null;
+  let imageText: string | null = null;
+
+  // If there's an image URL, try to download and embed it
+  if (outputImageUrl) {
+    try {
+      const response = await fetch(outputImageUrl);
+      if (response.ok) {
+        const arrayBuffer = await response.arrayBuffer();
+        const imageBuffer = Buffer.from(arrayBuffer);
+        imageRun = new ImageRun({
+          data: imageBuffer,
+          transformation: {
+            width: 450,
+            height: 300,
+          },
+        });
+      }
+    } catch (error) {
+      console.error('Failed to process image:', error);
+      // Fallback to text if image fails
+      if (outputImage) {
+        imageText = outputImage;
+      }
+    }
+  }
+
+  // If no image URL or image failed, use text-based output
+  if (!imageRun && outputImage) {
+    imageText = outputImage;
+  }
+
+  // If still no image, use default message
+  if (!imageRun && !imageText) {
+    imageText = 'No output image generated.';
+  }
 
   // Build the document
   const doc = new Document({
@@ -71,7 +110,7 @@ export const createWordDocument = async (
               new TextRun({
                 text: `Experiment No. ${experimentNumber}`,
                 bold: true,
-                size: 28, // 14pt (1pt = 2 half-points)
+                size: 28, // 14pt
                 font: 'Times New Roman',
               }),
             ],
@@ -169,13 +208,24 @@ export const createWordDocument = async (
               ]
             : []),
 
-          // ---- Output Image / Content ----
-          ...(outputImage
+          // ---- Output Image or Text ----
+          ...(imageRun
+            ? [
+                new Paragraph({
+                  children: [imageRun],
+                  alignment: AlignmentType.CENTER,
+                  spacing: {
+                    before: 100,
+                    after: 200,
+                  },
+                }),
+              ]
+            : imageText
             ? [
                 new Paragraph({
                   children: [
                     new TextRun({
-                      text: outputImage,
+                      text: imageText,
                       size: 20, // 10pt
                       font: 'Courier New',
                     }),
@@ -187,7 +237,23 @@ export const createWordDocument = async (
                   },
                 }),
               ]
-            : []),
+            : [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: 'No output image generated.',
+                      size: 20,
+                      font: 'Courier New',
+                      color: '888888',
+                    }),
+                  ],
+                  alignment: AlignmentType.CENTER,
+                  spacing: {
+                    before: 100,
+                    after: 200,
+                  },
+                }),
+              ]),
         ],
       },
     ],
@@ -206,15 +272,11 @@ const formatCodeBlock = (code: string): Paragraph[] => {
   const paragraphs: Paragraph[] = [];
 
   lines.forEach((line) => {
-    // Skip empty lines but keep them with just "> " prefix
-    const prefix = '>';
-    const content = line || '';
-    
     paragraphs.push(
       new Paragraph({
         children: [
           new TextRun({
-            text: `${prefix} ${content}`,
+            text: `> ${line}`,
             size: 20, // 10pt
             font: 'Courier New',
             color: '000000',
