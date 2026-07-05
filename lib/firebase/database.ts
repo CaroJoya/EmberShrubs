@@ -1,5 +1,4 @@
 // lib/firebase/database.ts
-import { adminDatabase } from './admin';
 import { database } from './config';
 import { ref, get, set, update, increment } from 'firebase/database';
 import { User, Guest, Generation } from '@/types';
@@ -7,6 +6,13 @@ import { v4 as uuidv4 } from 'uuid';
 
 // Determine if we're on the server or client
 const isServer = typeof window === 'undefined';
+
+// ✅ Lazy load admin database only on server
+const getAdminDatabase = async () => {
+  if (!isServer) return null;
+  const { adminDatabase } = await import('./admin');
+  return adminDatabase;
+};
 
 // === User Functions ===
 
@@ -16,8 +22,12 @@ export const getUserData = async (uid: string): Promise<User | null> => {
     let snapshot;
     
     if (isServer) {
-      // Use Admin SDK on server (bypasses security rules)
-      const userRef = adminDatabase.ref(`users/${uid}`);
+      // ✅ Use Admin SDK on server (bypasses security rules)
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const userRef = adminDb.ref(`users/${uid}`);
       snapshot = await userRef.get();
     } else {
       // Use Client SDK in browser
@@ -39,8 +49,12 @@ export const getUserData = async (uid: string): Promise<User | null> => {
 export const setUserData = async (uid: string, data: Partial<User>) => {
   try {
     if (isServer) {
-      // Use Admin SDK on server
-      const userRef = adminDatabase.ref(`users/${uid}`);
+      // ✅ Use Admin SDK on server
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const userRef = adminDb.ref(`users/${uid}`);
       await userRef.set(data);
     } else {
       // Use Client SDK in browser
@@ -59,7 +73,11 @@ export const setUserData = async (uid: string, data: Partial<User>) => {
 export const updateUserData = async (uid: string, data: Partial<User>) => {
   try {
     if (isServer) {
-      const userRef = adminDatabase.ref(`users/${uid}`);
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const userRef = adminDb.ref(`users/${uid}`);
       await userRef.update(data);
     } else {
       const userRef = ref(database, `users/${uid}`);
@@ -77,7 +95,11 @@ export const updateUserData = async (uid: string, data: Partial<User>) => {
 export const incrementUserTrial = async (uid: string) => {
   try {
     if (isServer) {
-      const userRef = adminDatabase.ref(`users/${uid}/freeTrialsUsed`);
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const userRef = adminDb.ref(`users/${uid}/freeTrialsUsed`);
       await userRef.transaction((current: number) => (current || 0) + 1);
     } else {
       const userRef = ref(database, `users/${uid}/freeTrialsUsed`);
@@ -108,7 +130,11 @@ export const getRemainingTrials = async (uid: string): Promise<number> => {
 export const resetUserTrials = async (uid: string) => {
   try {
     if (isServer) {
-      const userRef = adminDatabase.ref(`users/${uid}/freeTrialsUsed`);
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const userRef = adminDb.ref(`users/${uid}/freeTrialsUsed`);
       await userRef.set(0);
     } else {
       const userRef = ref(database, `users/${uid}/freeTrialsUsed`);
@@ -129,7 +155,11 @@ export const getGuestData = async (fingerprint: string): Promise<Guest | null> =
     let snapshot;
     
     if (isServer) {
-      const guestRef = adminDatabase.ref(`guests/${fingerprint}`);
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const guestRef = adminDb.ref(`guests/${fingerprint}`);
       snapshot = await guestRef.get();
     } else {
       const guestRef = ref(database, `guests/${fingerprint}`);
@@ -149,7 +179,11 @@ export const getGuestData = async (fingerprint: string): Promise<Guest | null> =
 export const setGuestData = async (fingerprint: string, data: Partial<Guest>) => {
   try {
     if (isServer) {
-      const guestRef = adminDatabase.ref(`guests/${fingerprint}`);
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const guestRef = adminDb.ref(`guests/${fingerprint}`);
       await guestRef.set(data);
     } else {
       const guestRef = ref(database, `guests/${fingerprint}`);
@@ -166,7 +200,11 @@ export const setGuestData = async (fingerprint: string, data: Partial<Guest>) =>
 export const incrementGuestTrial = async (fingerprint: string) => {
   try {
     if (isServer) {
-      const guestRef = adminDatabase.ref(`guests/${fingerprint}/freeTrialsUsed`);
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const guestRef = adminDb.ref(`guests/${fingerprint}/freeTrialsUsed`);
       await guestRef.transaction((current: number) => (current || 0) + 1);
     } else {
       const guestRef = ref(database, `guests/${fingerprint}/freeTrialsUsed`);
@@ -175,6 +213,28 @@ export const incrementGuestTrial = async (fingerprint: string) => {
     return { success: true };
   } catch (error) {
     console.error('Error incrementing guest trial:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: errorMessage };
+  }
+};
+
+// Reset guest trials
+export const resetGuestTrials = async (fingerprint: string) => {
+  try {
+    if (isServer) {
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const guestRef = adminDb.ref(`guests/${fingerprint}/freeTrialsUsed`);
+      await guestRef.set(0);
+    } else {
+      const guestRef = ref(database, `guests/${fingerprint}/freeTrialsUsed`);
+      await set(guestRef, 0);
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Error resetting guest trials:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: errorMessage };
   }
@@ -192,7 +252,11 @@ export const saveGeneration = async (uid: string, data: Omit<Generation, 'id' | 
     };
     
     if (isServer) {
-      const generationRef = adminDatabase.ref(`generations/${uid}/${generationId}`);
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const generationRef = adminDb.ref(`generations/${uid}/${generationId}`);
       await generationRef.set(generationData);
     } else {
       const generationRef = ref(database, `generations/${uid}/${generationId}`);
@@ -203,5 +267,76 @@ export const saveGeneration = async (uid: string, data: Omit<Generation, 'id' | 
     console.error('Error saving generation:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: errorMessage };
+  }
+};
+
+// Get user generations
+export const getUserGenerations = async (uid: string): Promise<Generation[]> => {
+  try {
+    let snapshot;
+    
+    if (isServer) {
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const generationsRef = adminDb.ref(`generations/${uid}`);
+      snapshot = await generationsRef.get();
+    } else {
+      const generationsRef = ref(database, `generations/${uid}`);
+      snapshot = await get(generationsRef);
+    }
+    
+    if (snapshot.exists()) {
+      const data = snapshot.val();
+      return Object.values(data) as Generation[];
+    }
+    return [];
+  } catch (error) {
+    console.error('Error fetching generations:', error);
+    return [];
+  }
+};
+
+// === Analytics Functions ===
+
+export const updateAnalytics = async (date: string, data: {
+  totalGenerations?: number;
+  uniqueUsers?: number;
+  premiumGenerations?: number;
+  guestGenerations?: number;
+  apiKeyGenerations?: number;
+}) => {
+  try {
+    if (isServer) {
+      const adminDb = await getAdminDatabase();
+      if (!adminDb) {
+        throw new Error('Admin database not available');
+      }
+      const analyticsRef = adminDb.ref(`analytics/daily/${date}`);
+      await analyticsRef.update(data);
+    } else {
+      const analyticsRef = ref(database, `analytics/daily/${date}`);
+      await update(analyticsRef, data);
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Error updating analytics:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: errorMessage };
+  }
+};
+
+// === Utility Functions ===
+
+export const hasTrialsLeft = async (uid: string): Promise<boolean> => {
+  try {
+    const userData = await getUserData(uid);
+    if (!userData) return false;
+    if (userData.isPremium) return true;
+    return (userData.maxFreeTrials - userData.freeTrialsUsed) > 0;
+  } catch (error) {
+    console.error('Error checking trials:', error);
+    return false;
   }
 };
