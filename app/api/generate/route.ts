@@ -18,6 +18,12 @@ import {
   generateFallbackDiagram
 } from '@/lib/docx/image-utils';
 import { encrypt, decrypt } from '@/lib/encryption/encrypt';
+import { 
+  withRateLimit, 
+  sanitizeInput, 
+  isValidPrompt, 
+  isValidLanguage 
+} from '@/lib/rate-limit';
 
 // Validation schema
 const generateSchema = z.object({
@@ -27,7 +33,7 @@ const generateSchema = z.object({
   title: z.string().optional(),
 });
 
-export async function POST(request: NextRequest) {
+export const POST = withRateLimit(async (request: NextRequest) => {
   try {
     // 1. Parse and validate request
     const body = await request.json();
@@ -41,9 +47,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { prompt, language, experimentNumber, title } = validationResult.data;
+    let { prompt, language, experimentNumber, title } = validationResult.data;
     
-    // 2. Get user info from headers
+    // 2. Sanitize inputs
+    prompt = sanitizeInput(prompt);
+    if (!isValidPrompt(prompt)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid prompt. Must be between 5 and 500 characters.' },
+        { status: 400 }
+      );
+    }
+    
+    if (!isValidLanguage(language)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid language selection.' },
+        { status: 400 }
+      );
+    }
+    
+    // Sanitize optional fields
+    if (title) {
+      title = sanitizeInput(title);
+      if (title.length > 100) {
+        return NextResponse.json(
+          { success: false, error: 'Title is too long (max 100 characters).' },
+          { status: 400 }
+        );
+      }
+    }
+    
+    if (experimentNumber) {
+      experimentNumber = sanitizeInput(experimentNumber);
+      if (!/^[a-zA-Z0-9\s.-]+$/.test(experimentNumber)) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid experiment number format.' },
+          { status: 400 }
+        );
+      }
+    }
+    
+    // 3. Get user info from headers
     const userId = request.headers.get('x-user-id');
     const guestFingerprint = request.headers.get('x-guest-fingerprint');
     const userApiKeyHeader = request.headers.get('x-user-api-key');
@@ -53,10 +96,18 @@ export async function POST(request: NextRequest) {
     let isPremium = false;
     let userType: 'premium' | 'free' | 'guest' | 'api-key' = 'guest';
 
-    // 3. Determine which API key to use and check trials
+    // 4. Determine which API key to use and check trials
     // Check for user-provided API key from header first (for guests)
     if (userApiKeyHeader && userApiKeyHeader.length > 10) {
-      apiKeyToUse = userApiKeyHeader;
+      // Validate the provided API key format
+      const sanitizedKey = sanitizeInput(userApiKeyHeader);
+      if (sanitizedKey.length < 10) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid API key format' },
+          { status: 400 }
+        );
+      }
+      apiKeyToUse = sanitizedKey;
       userType = 'api-key';
       remainingTrials = Infinity;
     } else if (userId) {
@@ -113,6 +164,14 @@ export async function POST(request: NextRequest) {
         }
       }
     } else if (guestFingerprint) {
+      // Validate guest fingerprint
+      if (!/^[a-zA-Z0-9_]+$/.test(guestFingerprint)) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid guest identifier' },
+          { status: 400 }
+        );
+      }
+      
       // Guest user - check for stored API key
       const guestData = await getGuestData(guestFingerprint);
       
@@ -168,7 +227,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. Generate assignment (code + image)
+    // Validate Gemini API key is working (quick check)
+    try {
+      const testResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKeyToUse}`,
+        { method: 'GET' }
+      );
+      if (!testResponse.ok) {
+        return NextResponse.json(
+          { success: false, error: 'The provided API key is invalid or expired.' },
+          { status: 401 }
+        );
+      }
+    } catch (error) {
+      console.error('API key validation error:', error);
+      // Continue anyway - the key might still work for generation
+    }
+
+    // 5. Generate assignment (code + image)
     const generationResult = await generateAssignment(prompt, language, apiKeyToUse);
 
     if (generationResult.error || !generationResult.code) {
@@ -181,7 +257,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 5. Process the output image
+    // 6. Process the output image
     let outputImage = generationResult.image;
     let outputImageUrl = generationResult.imageUrl;
     
@@ -190,7 +266,7 @@ export async function POST(request: NextRequest) {
       outputImage = generateFallbackDiagram(generationResult.code, language);
     }
 
-    // 6. Create Word document
+    // 7. Create Word document
     const expNumber = experimentNumber || '1';
     const docTitle = title || '';
 
@@ -206,11 +282,11 @@ export async function POST(request: NextRequest) {
 
     const wordBlob = await createWordDocument(docOptions);
 
-    // 7. Convert to Base64 for response
+    // 8. Convert to Base64 for response
     const buffer = await wordBlob.arrayBuffer();
     const base64File = Buffer.from(buffer).toString('base64');
 
-    // 8. Update trial counts (only for free users, not API key users)
+    // 9. Update trial counts (only for free users, not API key users)
     if (userType !== 'api-key') {
       if (userId && !isPremium) {
         await incrementUserTrial(userId);
@@ -225,7 +301,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 9. Save generation history (if logged in)
+    // 10. Save generation history (if logged in)
     if (userId) {
       await saveGeneration(userId, {
         prompt,
@@ -238,7 +314,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 10. Return response with file data
+    // 11. Return response with file data
     const fileName = docTitle 
       ? `daaExp${expNumber}_${docTitle.replace(/\s+/g, '_').toLowerCase()}.docx`
       : `daaExp${expNumber}.docx`;
@@ -270,12 +346,13 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 /**
  * GET endpoint to check remaining trials
+ * Rate limited: 20 requests per minute
  */
-export async function GET(request: NextRequest) {
+export const GET = withRateLimit(async (request: NextRequest) => {
   try {
     const userId = request.headers.get('x-user-id');
     const guestFingerprint = request.headers.get('x-guest-fingerprint');
@@ -333,6 +410,14 @@ export async function GET(request: NextRequest) {
     }
 
     if (guestFingerprint) {
+      // Validate guest fingerprint
+      if (!/^[a-zA-Z0-9_]+$/.test(guestFingerprint)) {
+        return NextResponse.json(
+          { error: 'Invalid guest identifier' },
+          { status: 400 }
+        );
+      }
+      
       const guestData = await getGuestData(guestFingerprint);
       if (guestData) {
         // Check if guest has stored API key
@@ -381,4 +466,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

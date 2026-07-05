@@ -1,0 +1,144 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid",
+        ".validate": "newData.hasChildren(['email', 'createdAt'])",
+        "email": {
+          ".validate": "newData.isString() && newData.val().matches(/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/)"
+        },
+        "displayName": {
+          ".validate": "newData.isString() && newData.val().length < 100"
+        },
+        "photoURL": {
+          ".validate": "newData.isString() || newData.val() === null"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "lastLogin": {
+          ".validate": "newData.isNumber()"
+        },
+        "isPremium": {
+          ".validate": "newData.isBoolean()"
+        },
+        "premiumSince": {
+          ".validate": "newData.isNumber() || newData.val() === null"
+        },
+        "premiumExpiry": {
+          ".validate": "newData.isNumber() || newData.val() === null"
+        },
+        "freeTrialsUsed": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "maxFreeTrials": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "apiKey": {
+          ".validate": "newData.isString() || newData.val() === null"
+        },
+        "apiKeyProvider": {
+          ".validate": "newData.isString() || newData.val() === null"
+        },
+        "totalGenerations": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "guests": {
+      "$fingerprint": {
+        ".read": "false",
+        ".write": "true",
+        ".validate": "newData.hasChildren(['firstVisit'])",
+        "freeTrialsUsed": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "maxFreeTrials": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "firstVisit": {
+          ".validate": "newData.isNumber()"
+        },
+        "lastVisit": {
+          ".validate": "newData.isNumber()"
+        },
+        "apiKey": {
+          ".validate": "newData.isString() || newData.val() === null"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "generations": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid",
+        "$generationId": {
+          ".validate": "newData.hasChildren(['prompt', 'language', 'code', 'createdAt', 'status'])",
+          "prompt": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 500"
+          },
+          "language": {
+            ".validate": "newData.isString() && newData.val().matches(/^(C|Python|Java|C\\+\\+)$/)"
+          },
+          "code": {
+            ".validate": "newData.isString() && newData.val().length > 0"
+          },
+          "outputImageUrl": {
+            ".validate": "newData.isString() || newData.val() === null"
+          },
+          "experimentNumber": {
+            ".validate": "newData.isString() || newData.val() === null"
+          },
+          "title": {
+            ".validate": "newData.isString() || newData.val() === null"
+          },
+          "createdAt": {
+            ".validate": "newData.isNumber()"
+          },
+          "status": {
+            ".validate": "newData.isString() && newData.val().matches(/^(pending|completed|failed)$/)"
+          },
+          "fileUrl": {
+            ".validate": "newData.isString() || newData.val() === null"
+          },
+          "$other": {
+            ".validate": "newData.isString() || newData.isNumber() || newData.val() === null"
+          }
+        }
+      }
+    },
+    "analytics": {
+      ".read": "false",
+      ".write": "false",
+      "daily": {
+        "$date": {
+          ".validate": "newData.hasChildren(['totalGenerations'])",
+          "totalGenerations": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "uniqueUsers": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "premiumGenerations": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "guestGenerations": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "apiKeyGenerations": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    }
+  }
+}

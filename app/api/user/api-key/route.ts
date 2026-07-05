@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getUserData, updateUserData } from '@/lib/firebase/database';
 import { encrypt, decrypt } from '@/lib/encryption/encrypt';
+import { withRateLimit, sanitizeInput, isValidLanguage } from '@/lib/rate-limit';
 
 const apiKeySchema = z.object({
   apiKey: z.string().min(10, 'API key must be at least 10 characters'),
@@ -10,8 +11,9 @@ const apiKeySchema = z.object({
 
 /**
  * POST - Save user's API key
+ * Rate limited: 5 requests per minute
  */
-export async function POST(request: NextRequest) {
+export const POST = withRateLimit(async (request: NextRequest) => {
   try {
     const userId = request.headers.get('x-user-id');
     if (!userId) {
@@ -33,10 +35,22 @@ export async function POST(request: NextRequest) {
 
     const { apiKey } = validationResult.data;
 
-    // Verify the API key is valid by doing a quick test
-    // This is optional but recommended
-    const isValid = await testGeminiApiKey(apiKey);
+    // Sanitize the API key (remove any whitespace)
+    const sanitizedKey = sanitizeInput(apiKey);
+    if (sanitizedKey.length < 10) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid API key format' },
+        { status: 400 }
+      );
+    }
+
+    // Verify the API key is valid
+    const isValid = await testGeminiApiKey(sanitizedKey);
     if (!isValid) {
+      // Track failed attempt
+      const { trackFailedRequest } = await import('@/lib/rate-limit');
+      trackFailedRequest(request);
+      
       return NextResponse.json(
         { success: false, error: 'Invalid Gemini API key. Please check and try again.' },
         { status: 400 }
@@ -44,7 +58,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Encrypt the API key before storing
-    const encryptedKey = encrypt(apiKey);
+    const encryptedKey = encrypt(sanitizedKey);
 
     // Save to Firebase
     const result = await updateUserData(userId, {
@@ -71,12 +85,12 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 /**
  * DELETE - Remove user's API key
  */
-export async function DELETE(request: NextRequest) {
+export const DELETE = withRateLimit(async (request: NextRequest) => {
   try {
     const userId = request.headers.get('x-user-id');
     if (!userId) {
@@ -110,12 +124,12 @@ export async function DELETE(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 /**
- * GET - Check if user has an API key and if it's valid
+ * GET - Check if user has an API key
  */
-export async function GET(request: NextRequest) {
+export const GET = withRateLimit(async (request: NextRequest) => {
   try {
     const userId = request.headers.get('x-user-id');
     if (!userId) {
@@ -135,11 +149,10 @@ export async function GET(request: NextRequest) {
 
     const hasApiKey = !!userData.apiKey;
     let isValid = false;
-    let decryptedKey = null;
 
     if (hasApiKey && userData.apiKey) {
       try {
-        decryptedKey = decrypt(userData.apiKey);
+        const decryptedKey = decrypt(userData.apiKey);
         isValid = decryptedKey.length > 10;
       } catch (error) {
         console.error('Error decrypting API key:', error);
@@ -151,7 +164,6 @@ export async function GET(request: NextRequest) {
       success: true,
       hasApiKey,
       isValid,
-      // Don't return the actual key for security
     });
 
   } catch (error) {
@@ -161,19 +173,26 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 /**
  * Test if a Gemini API key is valid
  */
 async function testGeminiApiKey(apiKey: string): Promise<boolean> {
   try {
-    // Simple test: try to list models or make a small request
+    // Add a timeout to prevent hanging
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
-      { method: 'GET' }
+      { 
+        method: 'GET',
+        signal: controller.signal,
+      }
     );
     
+    clearTimeout(timeoutId);
     return response.ok;
   } catch (error) {
     console.error('Error testing API key:', error);
