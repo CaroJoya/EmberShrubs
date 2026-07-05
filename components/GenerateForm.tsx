@@ -3,9 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Send, Loader2, Key, Check, X } from 'lucide-react';
-import { encrypt, decrypt } from '@/lib/encryption/encrypt';
 import { useAuth } from '@/contexts/AuthContext';
-import { useGuest } from '@/lib/hooks/useGuest';
 
 interface GenerateFormProps {
   onSubmit: (prompt: string, language: string, experimentNumber?: string, title?: string) => void;
@@ -23,7 +21,6 @@ export const GenerateForm: React.FC<GenerateFormProps> = ({
   remainingTrials = 5,
 }) => {
   const { user, refreshUser } = useAuth();
-  const { fingerprint } = useGuest();
   const [prompt, setPrompt] = useState('');
   const [language, setLanguage] = useState('C');
   const [experimentNumber, setExperimentNumber] = useState('');

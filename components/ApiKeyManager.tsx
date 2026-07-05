@@ -4,11 +4,9 @@
 import React, { useState, useEffect } from 'react';
 import { Key, Check, X, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useGuest } from '@/lib/hooks/useGuest';
 
 export const ApiKeyManager: React.FC = () => {
   const { user, refreshUser } = useAuth();
-  const { fingerprint } = useGuest();
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
