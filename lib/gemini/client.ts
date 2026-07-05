@@ -1,4 +1,4 @@
-// lib/gemini/client.ts
+// lib/gemini/client.ts (UPDATED)
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
 // System key (for free trials)
@@ -75,19 +75,29 @@ export const generateOutputImage = async (code: string, language: string, prompt
       safetySettings,
     });
 
+    // Enhanced prompt for better diagrams
     const systemPrompt = `Generate a simple text-based diagram or output representation for this program.
     
     Language: ${language}
     
     Code:
-    ${code}
+    ${code.substring(0, 1500)} ${code.length > 1500 ? '... (truncated)' : ''}
     
     Original request: ${prompt}
     
-    Provide a visual representation of what this program does (flowchart, structure diagram, or sample output).
-    If the program has output (like a linked list reversal), show BEFORE and AFTER states.
-    Keep it simple and clear. Use ASCII art or structured text.
-    If there's a sample output, show it clearly with sample data.`;
+    IMPORTANT: Provide a visual representation of what this program does.
+    
+    Guidelines:
+    1. If it's a data structure (linked list, tree, stack, queue, graph), show a BEFORE and AFTER state.
+    2. If it's a sorting algorithm, show the step-by-step sorting process.
+    3. If it's a search algorithm, show the search path.
+    4. Use ASCII art for diagrams (┌─┐│└┘├┤┴┬┼ characters).
+    5. Keep it to 15-25 lines maximum.
+    6. If the program has a specific output, show sample data.
+    7. For recursive functions, show the recursion tree.
+    8. For complex programs, show a simplified flowchart.
+    
+    Return ONLY the diagram, no explanations.`;
 
     const result = await model.generateContent(systemPrompt);
     const response = await result.response;
@@ -117,4 +127,12 @@ export const generateAssignment = async (prompt: string, language: string, apiKe
     image: imageResult.image,
     error: null,
   };
+};
+
+/**
+ * NEW: Generate only the output image for a given code
+ * This is useful for regenerating the output without regenerating the code
+ */
+export const generateImageOnly = async (code: string, language: string, prompt: string, apiKey?: string) => {
+  return await generateOutputImage(code, language, prompt, apiKey);
 };
