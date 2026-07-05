@@ -1,18 +1,12 @@
 // lib/firebase/admin.ts
+import 'server-only';
+
 import { initializeApp, getApps, cert, App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getDatabase } from 'firebase-admin/database';
 
-// ✅ Only initialize on server
-const isServer = typeof window === 'undefined';
-
 // Initialize Firebase Admin (only on server)
-function initAdmin(): App | null {
-  // ❌ Don't run on client
-  if (!isServer) {
-    return null;
-  }
-
+function initAdmin(): App {
   const apps = getApps();
   
   if (apps.length > 0) {
@@ -37,9 +31,8 @@ function initAdmin(): App | null {
   });
 }
 
-// ✅ Only initialize on server, null on client
-const adminApp = isServer ? initAdmin() : null;
-const adminAuth = adminApp ? getAuth(adminApp) : null;
-const adminDatabase = adminApp ? getDatabase(adminApp) : null;
+const adminApp = initAdmin();
+const adminAuth = getAuth(adminApp);
+const adminDatabase = getDatabase(adminApp);
 
 export { adminApp, adminAuth, adminDatabase };

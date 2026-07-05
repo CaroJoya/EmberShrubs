@@ -1,18 +1,17 @@
-// lib/firebase/database.ts
-'use client';
+// lib/firebase/server-db.ts
+import 'server-only';
 
-import { database } from './config';
-import { ref, get, set, update, increment } from 'firebase/database';
+import { adminDatabase } from './admin';
 import { User, Guest, Generation } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
 
-// === Client-only Database Functions ===
+// === Server-only Database Functions ===
 
 // Get user data
 export const getUserData = async (uid: string): Promise<User | null> => {
   try {
-    const userRef = ref(database, `users/${uid}`);
-    const snapshot = await get(userRef);
+    const userRef = adminDatabase.ref(`users/${uid}`);
+    const snapshot = await userRef.get();
     if (snapshot.exists()) {
       return snapshot.val();
     }
@@ -26,8 +25,8 @@ export const getUserData = async (uid: string): Promise<User | null> => {
 // Create or update user
 export const setUserData = async (uid: string, data: Partial<User>) => {
   try {
-    const userRef = ref(database, `users/${uid}`);
-    await set(userRef, data);
+    const userRef = adminDatabase.ref(`users/${uid}`);
+    await userRef.set(data);
     return { success: true };
   } catch (error) {
     console.error('Error setting user data:', error);
@@ -39,8 +38,8 @@ export const setUserData = async (uid: string, data: Partial<User>) => {
 // Update user fields
 export const updateUserData = async (uid: string, data: Partial<User>) => {
   try {
-    const userRef = ref(database, `users/${uid}`);
-    await update(userRef, data);
+    const userRef = adminDatabase.ref(`users/${uid}`);
+    await userRef.update(data);
     return { success: true };
   } catch (error) {
     console.error('Error updating user data:', error);
@@ -52,8 +51,8 @@ export const updateUserData = async (uid: string, data: Partial<User>) => {
 // Increment user trial count
 export const incrementUserTrial = async (uid: string) => {
   try {
-    const userRef = ref(database, `users/${uid}/freeTrialsUsed`);
-    await set(userRef, increment(1));
+    const userRef = adminDatabase.ref(`users/${uid}/freeTrialsUsed`);
+    await userRef.transaction((current: number) => (current || 0) + 1);
     return { success: true };
   } catch (error) {
     console.error('Error incrementing trial:', error);
@@ -78,8 +77,8 @@ export const getRemainingTrials = async (uid: string): Promise<number> => {
 // Reset user trials
 export const resetUserTrials = async (uid: string) => {
   try {
-    const userRef = ref(database, `users/${uid}/freeTrialsUsed`);
-    await set(userRef, 0);
+    const userRef = adminDatabase.ref(`users/${uid}/freeTrialsUsed`);
+    await userRef.set(0);
     return { success: true };
   } catch (error) {
     console.error('Error resetting trials:', error);
@@ -92,8 +91,8 @@ export const resetUserTrials = async (uid: string) => {
 
 export const getGuestData = async (fingerprint: string): Promise<Guest | null> => {
   try {
-    const guestRef = ref(database, `guests/${fingerprint}`);
-    const snapshot = await get(guestRef);
+    const guestRef = adminDatabase.ref(`guests/${fingerprint}`);
+    const snapshot = await guestRef.get();
     if (snapshot.exists()) {
       return snapshot.val();
     }
@@ -106,8 +105,8 @@ export const getGuestData = async (fingerprint: string): Promise<Guest | null> =
 
 export const setGuestData = async (fingerprint: string, data: Partial<Guest>) => {
   try {
-    const guestRef = ref(database, `guests/${fingerprint}`);
-    await set(guestRef, data);
+    const guestRef = adminDatabase.ref(`guests/${fingerprint}`);
+    await guestRef.set(data);
     return { success: true };
   } catch (error) {
     console.error('Error setting guest data:', error);
@@ -118,24 +117,11 @@ export const setGuestData = async (fingerprint: string, data: Partial<Guest>) =>
 
 export const incrementGuestTrial = async (fingerprint: string) => {
   try {
-    const guestRef = ref(database, `guests/${fingerprint}/freeTrialsUsed`);
-    await set(guestRef, increment(1));
+    const guestRef = adminDatabase.ref(`guests/${fingerprint}/freeTrialsUsed`);
+    await guestRef.transaction((current: number) => (current || 0) + 1);
     return { success: true };
   } catch (error) {
     console.error('Error incrementing guest trial:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: errorMessage };
-  }
-};
-
-// Reset guest trials
-export const resetGuestTrials = async (fingerprint: string) => {
-  try {
-    const guestRef = ref(database, `guests/${fingerprint}/freeTrialsUsed`);
-    await set(guestRef, 0);
-    return { success: true };
-  } catch (error) {
-    console.error('Error resetting guest trials:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: errorMessage };
   }
@@ -152,28 +138,12 @@ export const saveGeneration = async (uid: string, data: Omit<Generation, 'id' | 
       createdAt: Date.now(),
     };
     
-    const generationRef = ref(database, `generations/${uid}/${generationId}`);
-    await set(generationRef, generationData);
+    const generationRef = adminDatabase.ref(`generations/${uid}/${generationId}`);
+    await generationRef.set(generationData);
     return { success: true, id: generationId };
   } catch (error) {
     console.error('Error saving generation:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: errorMessage };
-  }
-};
-
-// Get user generations
-export const getUserGenerations = async (uid: string): Promise<Generation[]> => {
-  try {
-    const generationsRef = ref(database, `generations/${uid}`);
-    const snapshot = await get(generationsRef);
-    if (snapshot.exists()) {
-      const data = snapshot.val();
-      return Object.values(data) as Generation[];
-    }
-    return [];
-  } catch (error) {
-    console.error('Error fetching generations:', error);
-    return [];
   }
 };

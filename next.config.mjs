@@ -10,7 +10,7 @@ const nextConfig = {
   },
   // ✅ Tell Next.js these modules are server-only
   serverExternalPackages: ['firebase-admin'],
-  // ✅ Add webpack config to handle node modules
+  // ✅ Webpack config to handle node modules
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // Don't resolve 'fs', 'net', etc. on client
@@ -27,6 +27,15 @@ const nextConfig = {
         'node:http2': false,
         'node:dns': false,
         'node:child_process': false,
+        'node:buffer': false,
+        'node:crypto': false,
+        'node:events': false,
+        'node:https': false,
+        'node:url': false,
+        'node:stream': false,
+        'node:zlib': false,
+        'node:path': false,
+        'node:os': false,
       };
     }
     return config;

@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { generateAssignment } from '@/lib/gemini/client';
+// ✅ Import from server-db instead of database
 import { 
   getUserData, 
   incrementUserTrial,
@@ -10,7 +11,7 @@ import {
   incrementGuestTrial,
   getRemainingTrials,
   updateUserData
-} from '@/lib/firebase/database';
+} from '@/lib/firebase/server-db';
 import { 
   createWordDocument
 } from '@/lib/docx/generator';
